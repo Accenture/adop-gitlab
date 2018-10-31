@@ -1,0 +1,114 @@
+#!/bin/bash
+set -e
+
+# Script from https://gist.github.com/michaellihs/5ef5e8dbf48e63e2172a573f7b32c638
+# Generates a personal access token for the API as the root user
+generate_root_access_token() {
+    local GITLAB_HOST=${1}
+    local GITLAB_USER=${2}
+    local GITLAB_PASSWORD=${3}
+
+    # 1. curl the login page to get a session cookie and the sources with the auth token
+    body_header=$(curl -c cookies.txt -i "${GITLAB_HOST}/users/sign_in" -s)
+
+    # grep the auth token for the user login for
+    csrf_token=$(echo $body_header | perl -ne 'print "$1\n" if /new_user.*?authenticity_token"[[:blank:]]value="(.+?)"/' | sed -n 1p)
+
+    # 2. send login credentials with curl, using cookies and token from previous request
+    curl -b cookies.txt -c cookies.txt -i "${GITLAB_HOST}/users/sign_in" \
+        --data "user[login]=${GITLAB_USER}&user[password]=${GITLAB_PASSWORD}" \
+        --data-urlencode "authenticity_token=${csrf_token}"
+
+    # 3. send curl GET request to personal access token page to get auth token
+    body_header=$(curl -H 'user-agent: curl' \
+        -b cookies.txt \
+        -i "${GITLAB_HOST}/profile/personal_access_tokens" -s)
+    csrf_token=$(echo $body_header | perl -ne 'print "$1\n" if /authenticity_token"[[:blank:]]value="(.+?)"/' | sed -n 1p)
+
+    # 4. curl POST request to send the "generate personal access token form"
+    # the response will be a redirect, so we have to follow using `-L`
+    body_header=$(curl -L -b cookies.txt "${GITLAB_HOST}/profile/personal_access_tokens" \
+        --data-urlencode "authenticity_token=${csrf_token}" \
+        --data 'personal_access_token[name]=gitlab_root_token&personal_access_token[expires_at]=&personal_access_token[scopes][]=api')
+
+    # 5. Scrape the personal access token from the response HTML
+    personal_access_token=$(echo $body_header | perl -ne 'print "$1\n" if /created-personal-access-token"[[:blank:]]value="(.+?)"/' | sed -n 1p)
+    # Return token
+    echo "export root_api_token=${personal_access_token}" > /assets/secret
+}
+
+# Create personal access token from previous script to generate root api token
+make_ldap_user_as_admins() {
+    local GITLAB_HOST=${1}
+    local ROOT_API_TOKEN=${2}
+    local USER=${3}
+
+    # api call to get user details
+    requestbody=$(curl -X GET -H "Private-Token: ${ROOT_API_TOKEN}" \
+        ${GITLAB_HOST}/api/v4/users?username=${USER})
+    echo "Received user details, extracting user ID"
+
+    # regex the user ID
+    id=$(echo $requestbody | perl -ne 'print "$1\n" if /"id":(\d)/' | sed -n 1p)
+    echo "The jenkins user ID is: ${id}" 
+
+    # Change the user ID to admin
+    curl -X PUT -H "Private-Token: ${ROOT_API_TOKEN}" \
+        "${GITLAB_HOST}/api/v4/users/${id}?admin=true"
+
+    echo "${USER} user is now an admin in Gitlab"
+}
+
+# Set the root password, bypassing the password reset screen
+set_root_password() {
+    local GITLAB_HOST=${1}
+    local USER=${2}
+    local PASS=${3}
+
+    body_header=$(curl -v -L -H "Content-Type: application/json" -c cookies.txt -i "${GITLAB_HOST}" -s)
+
+    # Generating the CSRF token and password reset tokens required by GitLab
+    echo "[Token generation script]: Extracting the CSRF token from the login page..."
+    csrf_token=$(echo $body_header | perl -ne 'print "$1\n" if /new_user.*?authenticity_token"[[:blank:]]value="(.+?)"/')
+
+    echo "[Token generation script]: Extracted the CSRF token for the login page: $csrf_token"
+    reset_password_token=$(echo $body_header | perl -ne 'print "$1\n" if /input[[:blank:]]type="hidden"[[:blank:]]value="(.+?)"/')
+
+    echo "[Token generation script]: Extracted the password token for the login page: $reset_password_token"
+
+    # Curls the password reset with the provided tokens. Refreshing GitLab will now re-direct to the standard sign-on.
+    # Also changes the root password to the INITIAL_ADMIN_PASSWORD variable
+    curl -L -X POST -H "application/x-www-form-urlencoded" \
+        -b cookies.txt \
+        -c cookies.txt \
+        -i "${GITLAB_HOST}/users/password" \
+        --data-urlencode "authenticity_token=${csrf_token}" \
+        --data "_method=put&user[reset_password_token]=${reset_password_token}&user[password]=${USER}&[password_confirmation]=${PASS}"
+
+    # Returns a 400 code but does successfully reset the password for root account.
+}
+
+# Script heavily based on https://gist.github.com/michaellihs/5ef5e8dbf48e63e2172a573f7b32c638
+# This script logs in gitlab so they become visible to the root user.
+validate_as_ldap_user() {
+    local GITLAB_HOST=${1}
+    local USER=${2}
+    local PASS=${3} 
+
+    # 1. curl for the login page to get a session cookie and the sources with the auth tokens
+    echo "[Token generation script]: Curling login page......."
+    body_header=$(curl -c cookies.txt -i "${GITLAB_HOST}/users/sign_in" -s)
+
+    # grep the auth token for the user login for
+    echo "[Token generation script]: Extracting the CSRF token from the login page......."
+    csrf_token=$(echo $body_header | perl -ne 'print "$1\n" if /new_user.*?authenticity_token"[[:blank:]]value="(.+?)"/' | sed -n 1p)
+    echo "[Token generation script]: Extracted the CSRF token for the login page: $csrf_token"
+
+    # 2. send login credentials with curl, using cookies and token from previous request
+    echo "[Token generation script]: Logging in to Gitlab......."
+    curl -b cookies.txt -c cookies.txt -i "${GITLAB_HOST}/users/auth/ldapmain/callback" \
+                            --data "username=${USER}&password=${PASS}" \
+                            --data-urlencode "authenticity_token=${csrf_token}"
+
+    echo "${USER} user logged in"
+}
