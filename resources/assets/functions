@@ -62,8 +62,7 @@ make_ldap_user_as_admins() {
 # Set the root password, bypassing the password reset screen
 set_root_password() {
     local GITLAB_HOST=${1}
-    local USER=${2}
-    local PASS=${3}
+    local PASS=${2}
 
     body_header=$(curl -v -L -H "Content-Type: application/json" -c cookies.txt -i "${GITLAB_HOST}" -s)
 
@@ -83,7 +82,7 @@ set_root_password() {
         -c cookies.txt \
         -i "${GITLAB_HOST}/users/password" \
         --data-urlencode "authenticity_token=${csrf_token}" \
-        --data "_method=put&user[reset_password_token]=${reset_password_token}&user[password]=${USER}&[password_confirmation]=${PASS}"
+        --data "_method=put&user[reset_password_token]=${reset_password_token}&user[password]=${PASS}&[password_confirmation]=${PASS}"
 
     # Returns a 400 code but does successfully reset the password for root account.
 }
