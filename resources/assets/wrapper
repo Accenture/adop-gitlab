@@ -125,22 +125,22 @@ echo "============================ CONFIGURING GITLAB ==========================
 echo "----------------------------------------------------------------------------"
 
 echo "1/4: Setting root password for external user."
-set_root_password ${LOCAL_GITLAB_HOST} ${ADMIN_USER} ${ADMIN_PASSWORD}
+set_root_password ${LOCAL_GITLAB_HOST} ${INITIAL_ADMIN_PASSWORD}
 # Set the root password and bypass the default password reset screen
 
 # Log-in as the LDAP users so they are visible to the root account
 echo "2/4 Validating users.."
-validate_as_ldap_user ${LOCAL_GITLAB_HOST} ${ADMIN_USER} ${ADMIN_PASSWORD}
+validate_as_ldap_user ${LOCAL_GITLAB_HOST} ${INITIAL_ADMIN_USER} ${INITIAL_ADMIN_PASSWORD}
 validate_as_ldap_user ${LOCAL_GITLAB_HOST} ${JENKINS_USER} ${JENKINS_PASSWORD}
 
 # Generate an API token for the root user to make API calls
 echo "3/4 Generating root admin access token."
-generate_root_access_token ${LOCAL_GITLAB_HOST} "root" ${ADMIN_PASSWORD}
+generate_root_access_token ${LOCAL_GITLAB_HOST} "root" ${INITIAL_ADMIN_PASSWORD}
 
 # Make the LDAP users admins in GitLab
 echo "4/4 Granting users admin permission."
 source /assets/secret
-make_ldap_user_as_admins ${LOCAL_GITLAB_HOST} ${personal_access_token} ${ADMIN_USER}
+make_ldap_user_as_admins ${LOCAL_GITLAB_HOST} ${personal_access_token} ${INITIAL_ADMIN_USER}
 make_ldap_user_as_admins ${LOCAL_GITLAB_HOST} ${personal_access_token} ${JENKINS_USER}
 rm -f /assets/secret
 
